@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client
+  labels:
+    app: client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: client
+  template:
+    metadata:
+      labels:
+        app: client
+    spec:
+      containers:
+        - name: client
+          image: inventory-client:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+          env:
+            # Service discovery: the client (the Order Service from the
+            # Module 4 assignment) reaches Inventory only through the
+            # stable Service DNS name — never a Pod name or Pod IP.
+            - name: INVENTORY_URL
+              value: "http://inventory-service:5001"
+            # Notification Service is not part of this lab; the Order
+            # Service notifies fire-and-forget and ignores failures.
+            - name: NOTIFY_URL
+              value: "http://127.0.0.1:5002"
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
