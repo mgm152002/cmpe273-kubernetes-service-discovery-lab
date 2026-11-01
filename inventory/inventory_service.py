@@ -22,6 +22,11 @@ INVENTORY = {
 
 @app.get("/health")
 def health():
+    # Readiness toggle for the Kubernetes lab: while /tmp/unready exists
+    # inside the Pod, report 503 so the readiness probe fails and the
+    # Service stops routing traffic here — the process itself stays up.
+    if os.path.exists("/tmp/unready"):
+        return jsonify({"service": "inventory", "status": "unready"}), 503
     return jsonify({"service": "inventory", "status": "ok"})
 
 

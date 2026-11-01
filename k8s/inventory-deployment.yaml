@@ -20,6 +20,18 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5001
+          # The Service only routes to Pods whose readiness probe passes.
+          # /health returns 503 while /tmp/unready exists inside the Pod,
+          # which is how the readiness test takes one replica out of
+          # rotation without stopping it.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 3
+            periodSeconds: 3
+            failureThreshold: 2
+            successThreshold: 1
           resources:
             requests:
               cpu: "50m"
