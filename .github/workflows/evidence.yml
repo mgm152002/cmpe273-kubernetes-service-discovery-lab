@@ -1,0 +1,203 @@
+name: evidence-run
+
+on:
+  push:
+    branches: [main, ci-run]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubectl and kind
+        run: |
+          curl -sSLo kubectl "https://dl.k8s.io/release/v1.32.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          curl -sSLo kind "https://kind.sigs.k8s.io/dl/v0.26.0/kind-linux-amd64"
+          chmod +x kind && sudo mv kind /usr/local/bin/
+          kubectl version --client
+          kind version
+
+      - name: Create kind cluster and build images
+        run: |
+          kind create cluster --name inventory-lab --wait 180s
+          kubectl get nodes
+          docker build -t inventory-service:latest ./inventory
+          docker build -t inventory-client:latest ./client
+          kind load docker-image inventory-service:latest --name inventory-lab
+          kind load docker-image inventory-client:latest --name inventory-lab
+
+      - name: Run the lab scenario and capture evidence
+        run: |
+          set -u
+          mkdir -p evidence
+          show() { echo; echo "\$ $*"; "$@" 2>&1; }
+
+          # Place N orders of an item by calling the client Pod's own
+          # Order Service API from inside the client Pod. Every order makes
+          # the client call the Inventory Service through the Service name
+          # (GET /inventory/<item> + POST /inventory/<item>/reserve).
+          place_orders() {
+            local n=$1 item=$2 i
+            for i in $(seq 1 "$n"); do
+              echo "--- order $i of $n: POST /orders {\"item_id\": \"$item\", \"quantity\": 1} via the client Pod"
+              kubectl exec deploy/client -- python -c "import urllib.request, json; req = urllib.request.Request('http://127.0.0.1:5000/orders', data=json.dumps({'item_id': '$item', 'quantity': 1}).encode(), headers={'Content-Type': 'application/json'}); r = urllib.request.urlopen(req, timeout=5); print('order service responded', r.status, r.read().decode())" 2>&1 || true
+            done
+          }
+
+          # How many inventory requests each Pod has served so far,
+          # counted from that Pod's own log.
+          pod_counts() {
+            local p c
+            for p in $(kubectl get pods -l app=inventory -o jsonpath='{.items[*].metadata.name}'); do
+              c=$(kubectl logs "$p" 2>/dev/null | grep -cE '"(GET|POST) /inventory' || true)
+              echo "  $p : $c inventory requests served"
+            done
+          }
+
+          # ---------- 01: deploy, both replicas running ----------
+          {
+            echo "=== 01 - Deployment: 2 replicas behind one Service ==="
+            date -u +"captured (UTC): %Y-%m-%dT%H:%M:%SZ"
+            show kubectl apply -f k8s/
+            kubectl rollout status deployment/inventory --timeout=180s
+            kubectl rollout status deployment/client --timeout=180s
+            kubectl wait --for=condition=ready pod -l app=inventory --timeout=120s
+            sleep 5
+            show kubectl get nodes
+            show kubectl get pods -o wide
+            show kubectl get deployments
+            show kubectl get service inventory-service
+            show kubectl get endpoints inventory-service
+          } > evidence/01-deployment.txt 2>&1
+
+          # ---------- 02: both replicas serve via the Service name ----------
+          {
+            echo "=== 02 - Client reaches both replicas via the Service name ==="
+            date -u +"captured (UTC): %Y-%m-%dT%H:%M:%SZ"
+            echo
+            echo "# The client Pod (Order Service) is configured with"
+            echo "# INVENTORY_URL=http://inventory-service:5001 - the Service DNS name."
+            echo "# Each order below makes it query + reserve stock through that name."
+            echo
+            place_orders 8 widget
+            echo
+            echo "# requests served so far, counted from each inventory Pod's own log:"
+            pod_counts
+            echo
+            echo "# the same requests as seen in each Pod's log:"
+            for p in $(kubectl get pods -l app=inventory -o jsonpath='{.items[*].metadata.name}'); do
+              echo
+              echo "\$ kubectl logs $p | grep /inventory/"
+              kubectl logs "$p" 2>&1 | grep -E '/inventory/' | tail -8
+            done
+          } > evidence/02-service-discovery.txt 2>&1
+
+          # ---------- 03: readiness failure ----------
+          VICTIM=$(kubectl get pods -l app=inventory -o jsonpath='{.items[0].metadata.name}')
+          OTHER=$(kubectl get pods -l app=inventory -o jsonpath='{.items[1].metadata.name}')
+          {
+            echo "=== 03 - Readiness failure: one Pod leaves rotation, keeps running ==="
+            date -u +"captured (UTC): %Y-%m-%dT%H:%M:%SZ"
+            echo "pod made unready: $VICTIM"
+            echo "pod left serving: $OTHER"
+            echo
+            echo "# inventory requests served BEFORE the failure:"
+            pod_counts
+            show kubectl get pods
+            echo
+            echo "# create the file the /health readiness endpoint checks for:"
+            show kubectl exec "$VICTIM" -- touch /tmp/unready
+            echo
+            echo "# wait for the probe (period 3s, failureThreshold 2) to react"
+            sleep 10
+            show kubectl get pods
+            echo
+            echo "# endpoints: only the ready Pod's IP remains behind the Service"
+            show kubectl get endpoints inventory-service
+            echo
+            echo "# the unready Pod is still Running and still answers directly:"
+            echo "\$ kubectl exec $VICTIM -- python -c '<GET http://127.0.0.1:5001/inventory/widget>'"
+            kubectl exec "$VICTIM" -- python -c 'import urllib.request, sys; sys.stdout.write(urllib.request.urlopen("http://127.0.0.1:5001/inventory/widget").read().decode() + "\n")' 2>&1
+            echo
+            echo "# 3 more orders through the client (all must land on the ready Pod):"
+            place_orders 3 gadget
+            echo
+            echo "# inventory requests served AFTER the failure - the unready Pod's"
+            echo "# count is frozen, the ready Pod served everything new:"
+            pod_counts
+          } > evidence/03-readiness-failure.txt 2>&1
+
+          # ---------- 04: readiness recovery ----------
+          {
+            echo "=== 04 - Readiness recovery: Pod rejoins the Service ==="
+            date -u +"captured (UTC): %Y-%m-%dT%H:%M:%SZ"
+            echo "pod being restored: $VICTIM"
+            echo
+            echo "# inventory requests served BEFORE recovery:"
+            pod_counts
+            show kubectl exec "$VICTIM" -- rm /tmp/unready
+            echo
+            echo "# wait for the probe to pass again"
+            sleep 10
+            show kubectl get pods
+            show kubectl get endpoints inventory-service
+            echo
+            echo "# 3 more orders - the restored Pod serves again:"
+            place_orders 3 widget
+            echo
+            echo "# inventory requests served AFTER recovery - both counts grew:"
+            pod_counts
+          } > evidence/04-readiness-recovery.txt 2>&1
+
+          # ---------- 05: pod deletion and replacement ----------
+          {
+            echo "=== 05 - Pod deletion: Deployment replaces it, Service unchanged ==="
+            date -u +"captured (UTC): %Y-%m-%dT%H:%M:%SZ"
+            show kubectl get service inventory-service
+            VICTIM2=$(kubectl get pods -l app=inventory -o jsonpath='{.items[0].metadata.name}')
+            echo "pod to delete: $VICTIM2"
+            show kubectl get pods -o wide
+            show kubectl delete pod "$VICTIM2"
+            echo
+            echo "# wait for the Deployment to replace it"
+            for i in $(seq 1 40); do
+              READY=$(kubectl get pods -l app=inventory --no-headers 2>/dev/null | awk '$2=="1/1"' | wc -l)
+              COUNT=$(kubectl get pods -l app=inventory --no-headers 2>/dev/null | wc -l)
+              if [ "$READY" -eq 2 ] && [ "$COUNT" -eq 2 ]; then break; fi
+              sleep 3
+            done
+            kubectl rollout status deployment/inventory --timeout=180s
+            sleep 4
+            show kubectl get pods -o wide
+            echo
+            echo "# note the replacement Pod's new name; the Service is untouched:"
+            show kubectl get service inventory-service
+            show kubectl get endpoints inventory-service
+            echo
+            echo "# the client Pod was never restarted and still orders via the Service name:"
+            place_orders 2 gadget
+            echo
+            echo "# inventory requests served at the end (the brand-new Pod included):"
+            pod_counts
+            show kubectl get pods
+          } > evidence/05-pod-replacement.txt 2>&1
+
+          ls -la evidence/
+          cat evidence/*.txt
+
+      - name: Publish evidence to the evidence branch
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C evidence
+          git add evidence/
+          git commit -m "evidence: kind cluster run $(date -u +%Y-%m-%dT%H:%M:%SZ)" || echo "nothing to commit"
+          git push --force origin evidence
