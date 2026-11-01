@@ -20,15 +20,6 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5001
-          env:
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
           # The Service only routes to Pods whose readiness probe passes.
           # /health returns 503 while /tmp/unready exists inside the Pod,
           # which is how the readiness test takes one replica out of
