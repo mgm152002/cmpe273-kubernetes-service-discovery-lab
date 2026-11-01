@@ -18,19 +18,22 @@ spec:
         - name: client
           image: inventory-client:latest
           imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
           env:
-            # Service discovery: the client resolves the stable Service
-            # DNS name through cluster DNS. It never sees Pod IPs/names
-            # as addresses — Pod names only appear inside responses, so
-            # the logs show which replica served each request.
+            # Service discovery: the client (the Order Service from the
+            # Module 4 assignment) reaches Inventory only through the
+            # stable Service DNS name — never a Pod name or Pod IP.
             - name: INVENTORY_URL
               value: "http://inventory-service:5001"
-            - name: REQUEST_INTERVAL
-              value: "2"
+            # Notification Service is not part of this lab; the Order
+            # Service notifies fire-and-forget and ignores failures.
+            - name: NOTIFY_URL
+              value: "http://127.0.0.1:5002"
           resources:
             requests:
               cpu: "25m"
-              memory: "32Mi"
-            limits:
-              cpu: "100m"
               memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
