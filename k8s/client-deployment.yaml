@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client
+  labels:
+    app: client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: client
+  template:
+    metadata:
+      labels:
+        app: client
+    spec:
+      containers:
+        - name: client
+          image: inventory-client:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            # Service discovery: the client resolves the stable Service
+            # DNS name through cluster DNS. It never sees Pod IPs/names
+            # as addresses — Pod names only appear inside responses, so
+            # the logs show which replica served each request.
+            - name: INVENTORY_URL
+              value: "http://inventory-service:5001"
+            - name: REQUEST_INTERVAL
+              value: "2"
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
