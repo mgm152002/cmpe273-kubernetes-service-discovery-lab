@@ -1,0 +1,36 @@
+=== 01 - Deployment: 2 replicas behind one Service ===
+captured (UTC): 2026-11-01T18:19:57Z
+
+$ kubectl apply -f k8s/
+deployment.apps/client created
+deployment.apps/inventory created
+service/inventory-service created
+Waiting for deployment "inventory" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "inventory" rollout to finish: 1 of 2 updated replicas are available...
+deployment "inventory" successfully rolled out
+deployment "client" successfully rolled out
+pod/inventory-75f6c4659d-5f898 condition met
+pod/inventory-75f6c4659d-cw82s condition met
+
+$ kubectl get nodes
+NAME                          STATUS   ROLES           AGE   VERSION
+inventory-lab-control-plane   Ready    control-plane   51s   v1.32.0
+
+$ kubectl get pods -o wide
+NAME                         READY   STATUS    RESTARTS   AGE   IP           NODE                          NOMINATED NODE   READINESS GATES
+client-5b77dff769-cj84p      1/1     Running   0          11s   10.244.0.5   inventory-lab-control-plane   <none>           <none>
+inventory-75f6c4659d-5f898   1/1     Running   0          11s   10.244.0.6   inventory-lab-control-plane   <none>           <none>
+inventory-75f6c4659d-cw82s   1/1     Running   0          11s   10.244.0.7   inventory-lab-control-plane   <none>           <none>
+
+$ kubectl get deployments
+NAME        READY   UP-TO-DATE   AVAILABLE   AGE
+client      1/1     1            1           11s
+inventory   2/2     2            2           11s
+
+$ kubectl get service inventory-service
+NAME                TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+inventory-service   ClusterIP   10.96.225.209   <none>        5001/TCP   11s
+
+$ kubectl get endpoints inventory-service
+NAME                ENDPOINTS                         AGE
+inventory-service   10.244.0.6:5001,10.244.0.7:5001   11s

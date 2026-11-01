@@ -1,0 +1,55 @@
+=== 02 - Client reaches both replicas via the Service name ===
+captured (UTC): 2026-11-01T18:20:08Z
+
+# The client Pod (Order Service) is configured with
+# INVENTORY_URL=http://inventory-service:5001 - the Service DNS name.
+# Each order below makes it query + reserve stock through that name.
+
+--- order 1 of 8: POST /orders {"item_id": "widget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"widget","order_id":1,"quantity":1,"status":"created"}
+
+--- order 2 of 8: POST /orders {"item_id": "widget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"widget","order_id":2,"quantity":1,"status":"created"}
+
+--- order 3 of 8: POST /orders {"item_id": "widget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"widget","order_id":3,"quantity":1,"status":"created"}
+
+--- order 4 of 8: POST /orders {"item_id": "widget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"widget","order_id":4,"quantity":1,"status":"created"}
+
+--- order 5 of 8: POST /orders {"item_id": "widget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"widget","order_id":5,"quantity":1,"status":"created"}
+
+--- order 6 of 8: POST /orders {"item_id": "widget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"widget","order_id":6,"quantity":1,"status":"created"}
+
+--- order 7 of 8: POST /orders {"item_id": "widget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"widget","order_id":7,"quantity":1,"status":"created"}
+
+--- order 8 of 8: POST /orders {"item_id": "widget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"widget","order_id":8,"quantity":1,"status":"created"}
+
+
+# requests served so far, counted from each inventory Pod's own log:
+  inventory-75f6c4659d-5f898 : 6 inventory requests served
+  inventory-75f6c4659d-cw82s : 10 inventory requests served
+
+# the same requests as seen in each Pod's log:
+
+$ kubectl logs inventory-75f6c4659d-5f898 | grep /inventory/
+10.244.0.5 - - [01/Nov/2026 18:20:08] "POST /inventory/widget/reserve HTTP/1.1" 200 -
+10.244.0.5 - - [01/Nov/2026 18:20:08] "GET /inventory/widget HTTP/1.1" 200 -
+10.244.0.5 - - [01/Nov/2026 18:20:09] "GET /inventory/widget HTTP/1.1" 200 -
+10.244.0.5 - - [01/Nov/2026 18:20:09] "GET /inventory/widget HTTP/1.1" 200 -
+10.244.0.5 - - [01/Nov/2026 18:20:09] "GET /inventory/widget HTTP/1.1" 200 -
+10.244.0.5 - - [01/Nov/2026 18:20:10] "GET /inventory/widget HTTP/1.1" 200 -
+
+$ kubectl logs inventory-75f6c4659d-cw82s | grep /inventory/
+10.244.0.5 - - [01/Nov/2026 18:20:09] "POST /inventory/widget/reserve HTTP/1.1" 200 -
+10.244.0.5 - - [01/Nov/2026 18:20:09] "POST /inventory/widget/reserve HTTP/1.1" 200 -
+10.244.0.5 - - [01/Nov/2026 18:20:09] "GET /inventory/widget HTTP/1.1" 200 -
+10.244.0.5 - - [01/Nov/2026 18:20:09] "POST /inventory/widget/reserve HTTP/1.1" 200 -
+10.244.0.5 - - [01/Nov/2026 18:20:09] "POST /inventory/widget/reserve HTTP/1.1" 200 -
+10.244.0.5 - - [01/Nov/2026 18:20:10] "POST /inventory/widget/reserve HTTP/1.1" 200 -
+10.244.0.5 - - [01/Nov/2026 18:20:10] "GET /inventory/widget HTTP/1.1" 200 -
+10.244.0.5 - - [01/Nov/2026 18:20:10] "POST /inventory/widget/reserve HTTP/1.1" 200 -
