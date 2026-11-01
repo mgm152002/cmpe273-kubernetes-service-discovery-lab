@@ -1,0 +1,36 @@
+=== 04 - Readiness recovery: Pod rejoins the Service ===
+captured (UTC): 2026-11-01T18:23:27Z
+pod being restored: inventory-75f6c4659d-w9d5h
+
+# inventory requests served BEFORE recovery:
+  inventory-75f6c4659d-w9d5h : 9 inventory requests served
+  inventory-75f6c4659d-wq82l : 14 inventory requests served
+
+$ kubectl exec inventory-75f6c4659d-w9d5h -- rm /tmp/unready
+
+# wait for the probe to pass again
+
+$ kubectl get pods
+NAME                         READY   STATUS    RESTARTS   AGE
+client-5b77dff769-ttkkx      1/1     Running   0          35s
+inventory-75f6c4659d-w9d5h   1/1     Running   0          35s
+inventory-75f6c4659d-wq82l   1/1     Running   0          35s
+
+$ kubectl get endpoints inventory-service
+NAME                ENDPOINTS                         AGE
+inventory-service   10.244.0.5:5001,10.244.0.7:5001   35s
+
+# 3 more orders - the restored Pod serves again:
+--- order 1 of 3: POST /orders {"item_id": "widget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"widget","order_id":12,"quantity":1,"status":"created"}
+
+--- order 2 of 3: POST /orders {"item_id": "widget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"widget","order_id":13,"quantity":1,"status":"created"}
+
+--- order 3 of 3: POST /orders {"item_id": "widget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"widget","order_id":14,"quantity":1,"status":"created"}
+
+
+# inventory requests served AFTER recovery - both counts grew:
+  inventory-75f6c4659d-w9d5h : 12 inventory requests served
+  inventory-75f6c4659d-wq82l : 17 inventory requests served

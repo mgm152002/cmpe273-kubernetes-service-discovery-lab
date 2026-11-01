@@ -1,0 +1,53 @@
+=== 05 - Pod deletion: Deployment replaces it, Service unchanged ===
+captured (UTC): 2026-11-01T18:23:38Z
+
+$ kubectl get service inventory-service
+NAME                TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
+inventory-service   ClusterIP   10.96.216.86   <none>        5001/TCP   36s
+pod to delete: inventory-75f6c4659d-w9d5h
+
+$ kubectl get pods -o wide
+NAME                         READY   STATUS    RESTARTS   AGE   IP           NODE                          NOMINATED NODE   READINESS GATES
+client-5b77dff769-ttkkx      1/1     Running   0          36s   10.244.0.6   inventory-lab-control-plane   <none>           <none>
+inventory-75f6c4659d-w9d5h   1/1     Running   0          36s   10.244.0.7   inventory-lab-control-plane   <none>           <none>
+inventory-75f6c4659d-wq82l   1/1     Running   0          36s   10.244.0.5   inventory-lab-control-plane   <none>           <none>
+
+$ kubectl delete pod inventory-75f6c4659d-w9d5h
+pod "inventory-75f6c4659d-w9d5h" deleted
+
+# wait for the Deployment to replace it
+deployment "inventory" successfully rolled out
+
+$ kubectl get pods -o wide
+NAME                         READY   STATUS    RESTARTS   AGE   IP           NODE                          NOMINATED NODE   READINESS GATES
+client-5b77dff769-ttkkx      1/1     Running   0          71s   10.244.0.6   inventory-lab-control-plane   <none>           <none>
+inventory-75f6c4659d-6f8pg   1/1     Running   0          35s   10.244.0.8   inventory-lab-control-plane   <none>           <none>
+inventory-75f6c4659d-wq82l   1/1     Running   0          71s   10.244.0.5   inventory-lab-control-plane   <none>           <none>
+
+# note the replacement Pod's new name; the Service is untouched:
+
+$ kubectl get service inventory-service
+NAME                TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
+inventory-service   ClusterIP   10.96.216.86   <none>        5001/TCP   71s
+
+$ kubectl get endpoints inventory-service
+NAME                ENDPOINTS                         AGE
+inventory-service   10.244.0.5:5001,10.244.0.8:5001   71s
+
+# the client Pod was never restarted and still orders via the Service name:
+--- order 1 of 2: POST /orders {"item_id": "gadget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"gadget","order_id":15,"quantity":1,"status":"created"}
+
+--- order 2 of 2: POST /orders {"item_id": "gadget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"gadget","order_id":16,"quantity":1,"status":"created"}
+
+
+# inventory requests served at the end (the brand-new Pod included):
+  inventory-75f6c4659d-6f8pg : 4 inventory requests served
+  inventory-75f6c4659d-wq82l : 17 inventory requests served
+
+$ kubectl get pods
+NAME                         READY   STATUS    RESTARTS   AGE
+client-5b77dff769-ttkkx      1/1     Running   0          71s
+inventory-75f6c4659d-6f8pg   1/1     Running   0          35s
+inventory-75f6c4659d-wq82l   1/1     Running   0          71s

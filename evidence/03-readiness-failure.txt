@@ -1,0 +1,53 @@
+=== 03 - Readiness failure: one Pod leaves rotation, keeps running ===
+captured (UTC): 2026-11-01T18:23:15Z
+pod made unready: inventory-75f6c4659d-w9d5h
+pod left serving: inventory-75f6c4659d-wq82l
+
+# inventory requests served BEFORE the failure:
+  inventory-75f6c4659d-w9d5h : 8 inventory requests served
+  inventory-75f6c4659d-wq82l : 8 inventory requests served
+
+$ kubectl get pods
+NAME                         READY   STATUS    RESTARTS   AGE
+client-5b77dff769-ttkkx      1/1     Running   0          13s
+inventory-75f6c4659d-w9d5h   1/1     Running   0          13s
+inventory-75f6c4659d-wq82l   1/1     Running   0          13s
+
+# create the file the /health readiness endpoint checks for:
+
+$ kubectl exec inventory-75f6c4659d-w9d5h -- touch /tmp/unready
+
+# wait for the probe (period 3s, failureThreshold 2) to react
+
+$ kubectl get pods
+NAME                         READY   STATUS    RESTARTS   AGE
+client-5b77dff769-ttkkx      1/1     Running   0          24s
+inventory-75f6c4659d-w9d5h   0/1     Running   0          24s
+inventory-75f6c4659d-wq82l   1/1     Running   0          24s
+
+# endpoints: only the ready Pod's IP remains behind the Service
+
+$ kubectl get endpoints inventory-service
+NAME                ENDPOINTS         AGE
+inventory-service   10.244.0.5:5001   24s
+
+# the unready Pod is still Running and still answers directly:
+$ kubectl exec inventory-75f6c4659d-w9d5h -- python -c '<GET http://127.0.0.1:5001/inventory/widget>'
+{"available":true,"item_id":"widget","quantity":7}
+
+
+# 3 more orders through the client (all must land on the ready Pod):
+--- order 1 of 3: POST /orders {"item_id": "gadget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"gadget","order_id":9,"quantity":1,"status":"created"}
+
+--- order 2 of 3: POST /orders {"item_id": "gadget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"gadget","order_id":10,"quantity":1,"status":"created"}
+
+--- order 3 of 3: POST /orders {"item_id": "gadget", "quantity": 1} via the client Pod
+order service responded 201 {"item_id":"gadget","order_id":11,"quantity":1,"status":"created"}
+
+
+# inventory requests served AFTER the failure - the unready Pod's
+# count is frozen, the ready Pod served everything new:
+  inventory-75f6c4659d-w9d5h : 9 inventory requests served
+  inventory-75f6c4659d-wq82l : 14 inventory requests served
